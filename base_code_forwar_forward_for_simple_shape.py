@@ -1,9 +1,6 @@
 ###########################################
-#base code for forward forward simple shapes
-##############################################
-
-
-
+# Forward Forward - Simple Shapes (Fixed)
+###########################################
 
 import time
 import torch
@@ -65,14 +62,14 @@ def make_input(x, y):
     x[:, :NUM_CLASSES] = y_oh
     return x
 
+# ✅ FIX 1: neg_labels — guaranteed different label via random offset
 def neg_labels(y):
-    r = torch.randint(0, NUM_CLASSES, y.shape)
-    r[r == y] = (r[r == y] + 1) % NUM_CLASSES
-    return r
+    offsets = torch.randint(1, NUM_CLASSES, y.shape)
+    return (y + offsets) % NUM_CLASSES
 
 def per_class_accuracy(net, loader):
-    correct_per = [0]*NUM_CLASSES
-    total_per   = [0]*NUM_CLASSES
+    correct_per = [0] * NUM_CLASSES
+    total_per   = [0] * NUM_CLASSES
     for x, y in loader:
         preds = net.predict(x)
         for c in range(NUM_CLASSES):
@@ -122,8 +119,8 @@ class FFLayer(nn.Module):
         hp = self.forward(xp)
         hn = self.forward(xn)
 
-        gp = (hp**2).mean(dim=1)
-        gn = (hn**2).mean(dim=1)
+        gp = (hp ** 2).mean(dim=1)
+        gn = (hn ** 2).mean(dim=1)
 
         loss = (F.softplus(-gp + threshold) +
                 F.softplus( gn - threshold)).mean()
@@ -132,7 +129,13 @@ class FFLayer(nn.Module):
         loss.backward()
         self.opt.step()
 
-        return hp.detach(), hn.detach(), loss.item()
+        # ✅ FIX 2: Normalize activations before passing to the next layer
+        # Goodness is computed from raw h; normalized h is passed forward
+        hp_norm = hp / (hp.norm(dim=1, keepdim=True) + 1e-8)
+        hn_norm = hn / (hn.norm(dim=1, keepdim=True) + 1e-8)
+
+        return hp_norm.detach(), hn_norm.detach(), loss.item()
+
 
 class FFNet:
     def __init__(self):
@@ -151,7 +154,9 @@ class FFNet:
             h, g = xc, 0
             for layer in self.layers:
                 h = layer.forward(h)
-                g += (h**2).mean(dim=1)
+                g += (h ** 2).mean(dim=1)
+                # ✅ FIX 2: Normalize between layers during inference too
+                h = h / (h.norm(dim=1, keepdim=True) + 1e-8)
             scores.append(g.unsqueeze(1))
         return torch.cat(scores, dim=1).argmax(dim=1)
 
@@ -166,7 +171,7 @@ class FFNet:
     def train(self, loader, epochs):
         epoch_store = {}
 
-        for epoch in range(1, epochs+1):
+        for epoch in range(1, epochs + 1):
             total_loss = 0
 
             for x, y in loader:
@@ -178,27 +183,52 @@ class FFNet:
                     xp, xn, loss = layer.train_step(xp, xn)
                     total_loss += loss
 
-            # ✅ CORRECT: evaluate NOW (not later)
-            test_acc = self.evaluate(test_loader)
+            test_acc  = self.evaluate(test_loader)
             train_acc = self.evaluate(loader)
 
-            cm = confusion_matrix(self, test_loader)
+            cm        = confusion_matrix(self, test_loader)
             per_class = per_class_accuracy(self, test_loader)
 
             epoch_store[epoch] = {
-                'loss': total_loss,
-                'acc': test_acc,
-                'cm': cm,
+                'loss':      total_loss,
+                'acc':       test_acc,
+                'train_acc': train_acc,
+                'cm':        cm,
                 'per_class': per_class
             }
 
             print(f"Epoch {epoch} | Loss: {total_loss:.2f} | "
                   f"Train Acc: {train_acc:.2f}% | Test Acc: {test_acc:.2f}%")
 
-        # ───────── PRINT CORRECT HISTORY ─────────
-        print("\n===== DIAGNOSTICS =====")
-        for epoch in range(1, epochs+1):
+        # ───────── DIAGNOSTICS ─────────
+        print("\n===== FULL DIAGNOSTICS =====")
+        print(f"Dataset Choice : {choice}")
+        print(f"Epochs         : {epochs}")
+        print(f"Learning Rate  : {lr}")
+        print(f"Threshold      : {threshold}")
+        print(f"Num Classes    : {NUM_CLASSES}")
+        print(f"Classes        : {train_data.classes}")
+        print(f"Train Samples  : {len(train_data)}")
+        print(f"Test Samples   : {len(test_data)}")
+        print(f"Architecture   : 784 → 500 → 500 → 500")
+        print(f"Optimizer      : Adam")
+        print(f"Batch Size     : 256")
+        print(f"Loss Fn        : FF Softplus (layer-wise)")
+        print(f"Normalization  : L2 inter-layer (fixed)")
+        print(f"Neg Label Fn   : Offset-based (fixed)")
+        print()
+
+        for epoch in range(1, epochs + 1):
             print_diagnostic_block(epoch, epoch_store[epoch], train_data.classes)
+
+        # ───────── FINAL SUMMARY ─────────
+        best_epoch = max(epoch_store, key=lambda e: epoch_store[e]['acc'])
+        best       = epoch_store[best_epoch]
+        print(f"\n===== BEST EPOCH: {best_epoch} =====")
+        print(f"  Train Acc : {best['train_acc']:.2f}%")
+        print(f"  Test Acc  : {best['acc']:.2f}%")
+        print(f"  Loss      : {best['loss']:.2f}")
+
 
 # ─────────────────────────────────────────
 # RUN
