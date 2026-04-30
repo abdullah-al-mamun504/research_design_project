@@ -1,5 +1,5 @@
 ###########################################
-# Experiment 4: BP Training on MNIST (Fixed)
+# Experiment 4: BP Training — MNIST / FashionMNIST / EMNIST
 ###########################################
 
 import time
@@ -13,31 +13,56 @@ import matplotlib.gridspec as gridspec
 import numpy as np
 
 # ─────────────────────────────────────────
-# INPUT
+# DATASET SELECTION
+# ─────────────────────────────────────────
+print("1: MNIST")
+print("2: FashionMNIST")
+print("3: EMNIST (balanced)")
+choice = input("Select dataset (1 / 2 / 3): ").strip()
+
+if choice == '1':
+    data_path    = r"D:\Research design course\minist_dataset_experiment"
+    dataset_name = "MNIST"
+    NUM_CLASSES  = 10
+    train_data   = datasets.MNIST(root=data_path, train=True,  download=False, transform=transforms.Compose([
+                       transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]))
+    test_data    = datasets.MNIST(root=data_path, train=False, download=False, transform=transforms.Compose([
+                       transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]))
+    print("--- Running Experiment: MNIST ---")
+
+elif choice == '2':
+    data_path    = r"D:\Research design course\fashion_mnist_dataset"
+    dataset_name = "FashionMNIST"
+    NUM_CLASSES  = 10
+    train_data   = datasets.FashionMNIST(root=data_path, train=True,  download=False, transform=transforms.Compose([
+                       transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]))
+    test_data    = datasets.FashionMNIST(root=data_path, train=False, download=False, transform=transforms.Compose([
+                       transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]))
+    print("--- Running Experiment: FashionMNIST ---")
+
+else:
+    data_path    = r"D:\Research design course\emnist_dataset"
+    dataset_name = "EMNIST (balanced)"
+    NUM_CLASSES  = 47
+    train_data   = datasets.EMNIST(root=data_path, split='balanced', train=True,  download=False, transform=transforms.Compose([
+                       transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]))
+    test_data    = datasets.EMNIST(root=data_path, split='balanced', train=False, download=False, transform=transforms.Compose([
+                       transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]))
+    print("--- Running Experiment: EMNIST (balanced) ---")
+
+# ─────────────────────────────────────────
+# HYPERPARAMETER INPUT
 # ─────────────────────────────────────────
 epochs = int(input("Enter number of epochs: "))
 lr     = float(input("Enter learning rate (e.g. 0.001): "))
 
-NUM_CLASSES = 10
-device      = "cpu"
+device = "cpu"
 
-# ─────────────────────────────────────────
-# DATA
-# ─────────────────────────────────────────
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.5,), (0.5,))
-])
-
-data_path = r"D:\Research design course\minist_dataset_experiment"
-
-train_data   = datasets.MNIST(root=data_path, train=True,  download=True, transform=transform)
-test_data    = datasets.MNIST(root=data_path, train=False, download=True, transform=transform)
 train_loader = DataLoader(train_data, batch_size=256, shuffle=True)
 test_loader  = DataLoader(test_data,  batch_size=256, shuffle=False)
 
 print(f"Train: {len(train_data)} | Test: {len(test_data)}")
-print(f"Classes: {train_data.classes}")
+print(f"Classes ({NUM_CLASSES}): {train_data.classes[:10]}{'...' if NUM_CLASSES > 10 else ''}")
 
 # ─────────────────────────────────────────
 # HELPERS
@@ -54,7 +79,7 @@ def evaluate(model, loader):
             preds = model(x).argmax(dim=1)
             correct += (preds == y).sum().item()
             total   += y.size(0)
-    model.train()                          # ✅ FIX: restore train mode
+    model.train()
     return 100.0 * correct / total
 
 def per_class_accuracy(model, loader):
@@ -85,6 +110,10 @@ def confusion_matrix_bp(model, loader):
     return matrix
 
 def print_confusion(matrix, class_names):
+    # for EMNIST (47 classes) use condensed print to avoid very wide output
+    if NUM_CLASSES > 15:
+        print("  [Confusion matrix omitted in text — see plot]")
+        return
     print("\n  Confusion matrix:")
     col_w = 7
     print(f"  {'':8}" + "".join(f"{n:>{col_w}}" for n in class_names))
@@ -93,7 +122,7 @@ def print_confusion(matrix, class_names):
 
 def print_diagnostic_block(epoch, stored, class_names):
     print(f"\n[Epoch {epoch}]")
-    print(f"  Loss: {stored['loss']:.4f} | Test Acc: {stored['acc']:.2f}%")
+    print(f"  Loss: {stored['loss']:.4f} | Train Acc: {stored['train_acc']:.2f}% | Test Acc: {stored['acc']:.2f}%")
 
     ll  = stored['layer_loss']
     gn2 = stored['avg_gnorm']
@@ -103,13 +132,12 @@ def print_diagnostic_block(epoch, stored, class_names):
           f"L3: {ll[2]:>7.4f}   L4(cls): {ll[3]:>7.4f}")
     print(f"  Grad norm     →  L1: {gn2[0]:>6.3f}    L2: {gn2[1]:>6.3f}    "
           f"L3: {gn2[2]:>6.3f}    L4(cls): {gn2[3]:>6.3f}")
-    print(f"  Dead neurons  →  L1: {d[0]:>4d}     L2: {d[1]:>4d}     "
-          f"L3: {d[2]:>4d}")
+    print(f"  Dead neurons  →  L1: {d[0]:>4d}     L2: {d[1]:>4d}     L3: {d[2]:>4d}")
 
     print("\n  Per-class accuracy:")
     for i, name in enumerate(class_names):
         c, t = stored['per_class'][i]
-        print(f"    {name:<12}: {100*c/max(t,1):.2f}%  ({c}/{t})")
+        print(f"    {name:<14}: {100*c/max(t,1):.2f}%  ({c}/{t})")
 
     print_confusion(stored['cm'], class_names)
 
@@ -129,7 +157,6 @@ def plot_all(epoch_store, class_names, epochs, best_epoch):
     final_cm   = epoch_store[epochs]['cm'].numpy()
 
     layer_colors = ['#E63946', '#2A9D8F', '#E9C46A', '#8338EC']
-    digit_colors = plt.cm.tab10(np.linspace(0, 1, NUM_CLASSES))
 
     plt.rcParams.update({
         'font.family':      'DejaVu Sans',
@@ -143,40 +170,33 @@ def plot_all(epoch_store, class_names, epochs, best_epoch):
 
     fig = plt.figure(figsize=(18, 14))
     fig.suptitle(
-        f"Backpropagation Network — MNIST\n"
-        f"Epochs: {epochs}  |  LR: {lr}  |  "
+        f"Backpropagation Network — {dataset_name}\n"
+        f"Epochs: {epochs}  |  LR: {lr}  |  Classes: {NUM_CLASSES}  |  "
         f"Train: {len(train_data)}  |  Test: {len(test_data)}",
         fontsize=14, fontweight='bold', y=0.98
     )
 
     gs = gridspec.GridSpec(3, 3, figure=fig, hspace=0.45, wspace=0.38)
 
-    # ── 1. Loss curve ──────────────────────────────────────
+    # 1. Loss curve
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.plot(ep, losses, color='#2E86AB', linewidth=2, marker='o', markersize=5)
     ax1.axvline(best_epoch, color='gray', linestyle='--', linewidth=1,
                 alpha=0.7, label=f'Best epoch {best_epoch}')
     ax1.set_title("Total Loss per Epoch")
-    ax1.set_xlabel("Epoch")
-    ax1.set_ylabel("Loss")
-    ax1.legend(fontsize=9)
-    ax1.set_xticks(ep)
+    ax1.set_xlabel("Epoch"); ax1.set_ylabel("Loss")
+    ax1.legend(fontsize=9); ax1.set_xticks(ep)
 
-    # ── 2. Train vs Test accuracy ──────────────────────────
+    # 2. Train vs Test accuracy
     ax2 = fig.add_subplot(gs[0, 1])
-    ax2.plot(ep, train_accs, color='#2A9D8F', linewidth=2, marker='o',
-             markersize=5, label='Train')
-    ax2.plot(ep, test_accs,  color='#E63946', linewidth=2, marker='s',
-             markersize=5, label='Test')
+    ax2.plot(ep, train_accs, color='#2A9D8F', linewidth=2, marker='o', markersize=5, label='Train')
+    ax2.plot(ep, test_accs,  color='#E63946', linewidth=2, marker='s', markersize=5, label='Test')
     ax2.axvline(best_epoch, color='gray', linestyle='--', linewidth=1, alpha=0.7)
     ax2.set_title("Train vs Test Accuracy")
-    ax2.set_xlabel("Epoch")
-    ax2.set_ylabel("Accuracy (%)")
-    ax2.set_ylim(0, 105)
-    ax2.legend(fontsize=9)
-    ax2.set_xticks(ep)
+    ax2.set_xlabel("Epoch"); ax2.set_ylabel("Accuracy (%)")
+    ax2.set_ylim(0, 105); ax2.legend(fontsize=9); ax2.set_xticks(ep)
 
-    # ── 3. Layer-wise loss across epochs ──────────────────
+    # 3. Layer-wise loss
     ax3 = fig.add_subplot(gs[0, 2])
     layer_labels = ['Layer 1', 'Layer 2', 'Layer 3', 'Layer 4 (cls)']
     for l in range(4):
@@ -184,116 +204,99 @@ def plot_all(epoch_store, class_names, epochs, best_epoch):
         ax3.plot(ep, ll_ep, color=layer_colors[l], linewidth=2,
                  marker='o', markersize=5, label=layer_labels[l])
     ax3.set_title("Layer-wise Loss per Epoch")
-    ax3.set_xlabel("Epoch")
-    ax3.set_ylabel("Loss")
-    ax3.legend(fontsize=9)
-    ax3.set_xticks(ep)
+    ax3.set_xlabel("Epoch"); ax3.set_ylabel("Loss")
+    ax3.legend(fontsize=9); ax3.set_xticks(ep)
 
-    # ── 4. Dead neurons per layer ─────────────────────────
+    # 4. Dead neurons
     ax4 = fig.add_subplot(gs[1, 0])
     for l in range(3):
         ax4.plot(ep, dead[l], color=layer_colors[l], linewidth=2,
                  marker='o', markersize=5, label=f'Layer {l+1}')
     ax4.set_title("Dead Neurons per Layer")
-    ax4.set_xlabel("Epoch")
-    ax4.set_ylabel("Dead Neuron Count")
-    ax4.legend(fontsize=9)
-    ax4.set_xticks(ep)
+    ax4.set_xlabel("Epoch"); ax4.set_ylabel("Dead Neuron Count")
+    ax4.legend(fontsize=9); ax4.set_xticks(ep)
 
-    # ── 5. Per-class accuracy bar chart ──────────────────
+    # 5. Per-class accuracy bar chart
     ax5 = fig.add_subplot(gs[1, 1])
-    bars = ax5.bar(class_names, final_pc, color=digit_colors,
-                   edgecolor='white', linewidth=0.8)
-    for bar, val in zip(bars, final_pc):
-        ax5.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
-                 f"{val:.1f}%", ha='center', va='bottom',
-                 fontsize=7.5, fontweight='bold')
+    x_pos  = np.arange(NUM_CLASSES)
+    colors = plt.cm.tab20(np.linspace(0, 1, NUM_CLASSES)) if NUM_CLASSES > 10 \
+             else plt.cm.tab10(np.linspace(0, 1, NUM_CLASSES))
+    bars   = ax5.bar(x_pos, final_pc, color=colors, edgecolor='white', linewidth=0.8)
+    # only annotate bars if ≤15 classes (EMNIST would be too crowded)
+    if NUM_CLASSES <= 15:
+        for bar, val in zip(bars, final_pc):
+            ax5.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
+                     f"{val:.1f}%", ha='center', va='bottom', fontsize=7, fontweight='bold')
     ax5.set_title(f"Per-class Accuracy\n(Final Epoch {epochs})")
     ax5.set_ylabel("Accuracy (%)")
     ax5.set_ylim(0, 115)
-    ax5.tick_params(axis='x', rotation=15)
+    ax5.set_xticks(x_pos)
+    ax5.set_xticklabels(class_names, rotation=45, ha='right',
+                        fontsize=6 if NUM_CLASSES > 15 else 8)
 
-    # ── 6. Confusion matrix heatmap ───────────────────────
+    # 6. Confusion matrix heatmap
     ax6 = fig.add_subplot(gs[1, 2])
     im = ax6.imshow(final_cm, interpolation='nearest', cmap='Blues')
     plt.colorbar(im, ax=ax6, fraction=0.046, pad=0.04)
-    ax6.set_xticks(range(NUM_CLASSES))
-    ax6.set_yticks(range(NUM_CLASSES))
-    ax6.set_xticklabels(class_names, rotation=30, ha='right', fontsize=8)
-    ax6.set_yticklabels(class_names, fontsize=8)
+    tick_fs = 5 if NUM_CLASSES > 20 else 8
+    ax6.set_xticks(range(NUM_CLASSES)); ax6.set_yticks(range(NUM_CLASSES))
+    ax6.set_xticklabels(class_names, rotation=90, ha='right', fontsize=tick_fs)
+    ax6.set_yticklabels(class_names, fontsize=tick_fs)
     ax6.set_title(f"Confusion Matrix\n(Final Epoch {epochs})")
-    ax6.set_xlabel("Predicted")
-    ax6.set_ylabel("Actual")
-    thresh = final_cm.max() / 2.0
-    for i in range(NUM_CLASSES):
-        for j in range(NUM_CLASSES):
-            ax6.text(j, i, str(final_cm[i, j]),
-                     ha='center', va='center', fontsize=7,
-                     color='white' if final_cm[i, j] > thresh else 'black')
+    ax6.set_xlabel("Predicted"); ax6.set_ylabel("Actual")
+    # only annotate cells for ≤15 classes
+    if NUM_CLASSES <= 15:
+        thresh = final_cm.max() / 2.0
+        for i in range(NUM_CLASSES):
+            for j in range(NUM_CLASSES):
+                ax6.text(j, i, str(final_cm[i, j]), ha='center', va='center',
+                         fontsize=7, color='white' if final_cm[i, j] > thresh else 'black')
 
-    # ── 7. Gradient norm per layer ────────────────────────
+    # 7. Gradient norm
     ax7 = fig.add_subplot(gs[2, 0])
     for l in range(4):
         gn_ep = [epoch_store[e]['avg_gnorm'][l] for e in ep]
         ax7.plot(ep, gn_ep, color=layer_colors[l], linewidth=2,
                  marker='o', markersize=5, label=layer_labels[l])
     ax7.set_title("Gradient Norm per Layer")
-    ax7.set_xlabel("Epoch")
-    ax7.set_ylabel("Grad Norm")
-    ax7.legend(fontsize=9)
-    ax7.set_xticks(ep)
+    ax7.set_xlabel("Epoch"); ax7.set_ylabel("Grad Norm")
+    ax7.legend(fontsize=9); ax7.set_xticks(ep)
 
-    # ── 8. ΔLoss bar chart ────────────────────────────────
+    # 8. ΔLoss bar chart
     ax8 = fig.add_subplot(gs[2, 1])
     delta_losses = [0] + [losses[i] - losses[i-1] for i in range(1, len(losses))]
     bar_colors   = ['#E63946' if d >= 0 else '#2A9D8F' for d in delta_losses]
     ax8.bar(ep, delta_losses, color=bar_colors, edgecolor='white', linewidth=0.5)
     ax8.axhline(0, color='black', linewidth=0.8)
     ax8.set_title("Loss Change per Epoch (ΔLoss)")
-    ax8.set_xlabel("Epoch")
-    ax8.set_ylabel("ΔLoss")
-    ax8.set_xticks(ep)
+    ax8.set_xlabel("Epoch"); ax8.set_ylabel("ΔLoss"); ax8.set_xticks(ep)
 
-    # ── 9. Train/Test accuracy gap ────────────────────────
+    # 9. Train/Test gap
     ax9 = fig.add_subplot(gs[2, 2])
     acc_gap = [train_accs[i] - test_accs[i] for i in range(len(ep))]
     ax9.plot(ep, acc_gap, color='#F18F01', linewidth=2, marker='o', markersize=5)
     ax9.axhline(0, color='gray', linestyle='--', linewidth=1)
-    ax9.fill_between(ep, acc_gap, 0,
-                     where=[g > 0 for g in acc_gap],
+    ax9.fill_between(ep, acc_gap, 0, where=[g > 0  for g in acc_gap],
                      alpha=0.15, color='#E63946', label='Overfit region')
-    ax9.fill_between(ep, acc_gap, 0,
-                     where=[g <= 0 for g in acc_gap],
+    ax9.fill_between(ep, acc_gap, 0, where=[g <= 0 for g in acc_gap],
                      alpha=0.15, color='#2A9D8F', label='Underfit region')
     ax9.set_title("Train − Test Accuracy Gap\n(Generalization)")
-    ax9.set_xlabel("Epoch")
-    ax9.set_ylabel("Gap (%)")
-    ax9.legend(fontsize=9)
-    ax9.set_xticks(ep)
+    ax9.set_xlabel("Epoch"); ax9.set_ylabel("Gap (%)")
+    ax9.legend(fontsize=9); ax9.set_xticks(ep)
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-
-    # ── DISPLAY ───────────────────────────────────────────
     plt.show()
 
-    # ── SAVE (commented out — uncomment to save to disk) ──
-    # save_path = r"D:\results\mnist_bp_thesis_plots.png"
-    # fig.savefig(save_path, dpi=300, bbox_inches='tight')
-    # print(f"  Plots saved → {save_path}")
-
 # ─────────────────────────────────────────
-# MODEL
+# MODEL — output size driven by NUM_CLASSES
 # ─────────────────────────────────────────
 class BPNet(nn.Module):
     def __init__(self):
         super().__init__()
-        # ✅ FIX: named layers instead of Sequential
-        #         enables per-layer grad norm + dead neuron tracking
-        # ✅ FIX: 500 units to match MNIST FF for fair comparison
         self.l1  = nn.Linear(784, 500)
         self.l2  = nn.Linear(500, 500)
         self.l3  = nn.Linear(500, 500)
-        self.cls = nn.Linear(500, NUM_CLASSES)
+        self.cls = nn.Linear(500, NUM_CLASSES)   # ← adapts to 10 or 47
 
     def forward(self, x):
         x  = x.view(x.size(0), -1)
@@ -303,7 +306,6 @@ class BPNet(nn.Module):
         return self.cls(h3)
 
     def get_layer_activations(self, x):
-        """Returns hidden activations for dead neuron tracking."""
         x  = x.view(x.size(0), -1)
         h1 = F.relu(self.l1(x))
         h2 = F.relu(self.l2(h1))
@@ -311,45 +313,50 @@ class BPNet(nn.Module):
         return [h1, h2, h3]
 
 # ─────────────────────────────────────────
-# PER-LAYER GRAD NORM
+# PER-LAYER GRAD NORM & LOSS CONTRIBUTION
 # ─────────────────────────────────────────
 def get_layer_grad_norm(model):
     layers = [model.l1, model.l2, model.l3, model.cls]
     norms  = []
     for layer in layers:
         params = [p for p in layer.parameters() if p.grad is not None]
-        if params:
-            total = sum(p.grad.norm().item() ** 2 for p in params) ** 0.5
-        else:
-            total = 0.0
+        total  = sum(p.grad.norm().item() ** 2 for p in params) ** 0.5 if params else 0.0
         norms.append(total)
     return norms
 
 def get_layer_loss_contribution(model, x, y, criterion):
-    """Approximate per-layer loss as fraction of activation norm."""
     x   = x.view(x.size(0), -1)
     h1  = F.relu(model.l1(x))
     h2  = F.relu(model.l2(h1))
     h3  = F.relu(model.l3(h2))
     out = model.cls(h3)
     loss = criterion(out, y)
-    norms    = [h1.norm().item(), h2.norm().item(),
-                h3.norm().item(), out.norm().item()]
-    total_n  = sum(norms) + 1e-8
-    loss_val = loss.item()
-    return [loss_val * (n / total_n) for n in norms], loss
+    norms   = [h1.norm().item(), h2.norm().item(), h3.norm().item(), out.norm().item()]
+    total_n = sum(norms) + 1e-8
+    lv      = loss.item()
+    return [lv * (n / total_n) for n in norms], loss
 
 # ─────────────────────────────────────────
 # TRAINING
 # ─────────────────────────────────────────
 def train_model(model, loader, epochs):
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)  # ✅ FIX: user input lr
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
 
     epoch_store = {}
     prev_loss   = None
     epoch_times = []
 
+    # header
+    print("\n" + "=" * 70)
+    print(f"  BACKPROPAGATION EXPERIMENT — {dataset_name}")
+    print(f"  Epochs: {epochs}  |  LR: {lr}  |  Classes: {NUM_CLASSES}")
+    print(f"  Train: {len(train_data)}  |  Test: {len(test_data)}")
+    print("=" * 70)
+
+    # ══════════════════════════
+    # PHASE 1 — training loop
+    # ══════════════════════════
     for epoch in range(1, epochs + 1):
         model.train()
         total_loss  = 0.0
@@ -392,16 +399,15 @@ def train_model(model, loader, epochs):
         epoch_time = time.time() - t_start
         epoch_times.append(epoch_time)
 
-        nb       = max(n_batches, 1)
-        avg_gn2  = [layer_gnorm[i] / nb for i in range(4)]
-        avg_dead = [layer_dead[i]  // nb for i in range(3)]
-
+        nb        = max(n_batches, 1)
+        avg_gn2   = [layer_gnorm[i] / nb for i in range(4)]
+        avg_dead  = [layer_dead[i]  // nb for i in range(3)]
         train_acc = 100.0 * correct / total
-        test_acc  = evaluate(model, test_loader)   # ✅ FIX: test acc every epoch
+        test_acc  = evaluate(model, test_loader)
         cm        = confusion_matrix_bp(model, test_loader)
         pc        = per_class_accuracy(model, test_loader)
 
-        delta_str     = f"{total_loss - prev_loss:+.2f}" if prev_loss is not None else "—"
+        delta_str     = f"{total_loss - prev_loss:+.2f}" if prev_loss is not None else "        —"
         prev_loss     = total_loss
         avg_time      = sum(epoch_times) / len(epoch_times)
         remaining     = avg_time * (epochs - epoch)
@@ -418,39 +424,36 @@ def train_model(model, loader, epochs):
             'avg_dead':   avg_dead,
         }
 
-        # ── EPOCH PROGRESS LINE ──
+        # one line per epoch
         print(f"Epoch {epoch:>3} | Loss: {total_loss:>8.4f} | ΔLoss: {delta_str:>9} | "
               f"Train Acc: {train_acc:>6.2f}% | Test Acc: {test_acc:>6.2f}% | "
               f"Time: {epoch_time:>5.1f}s | ETA: {remaining:>5.1f}s{converged_tag}")
 
-    # ───────── FULL DIAGNOSTICS ─────────
-    print("\n===== FULL DIAGNOSTICS =====")
-    print(f"Dataset        : MNIST")
-    print(f"Epochs         : {epochs}")
-    print(f"Learning Rate  : {lr}")
-    print(f"Num Classes    : {NUM_CLASSES}")
-    print(f"Classes        : {train_data.classes}")
-    print(f"Train Samples  : {len(train_data)}")
-    print(f"Test Samples   : {len(test_data)}")
-    print(f"Architecture   : 784 → 500 → 500 → 500 → 10")
-    print(f"Optimizer      : Adam")
-    print(f"Batch Size     : 256")
-    print(f"Loss Fn        : CrossEntropyLoss")
-    print(f"Training Mode  : Backpropagation (end-to-end)")
-    print()
+    total_time = sum(epoch_times)
+
+    # ══════════════════════════
+    # PHASE 2 — diagnostics
+    # ══════════════════════════
+    print("\n" + "=" * 70)
+    print("  EPOCH DIAGNOSTICS")
+    print("=" * 70)
+    print(f"  Dataset      : {dataset_name}")
+    print(f"  Architecture : 784 → 500 → 500 → 500 → {NUM_CLASSES}")
+    print(f"  Optimizer    : Adam  |  Loss Fn: CrossEntropyLoss  |  Batch: 256")
 
     for epoch in range(1, epochs + 1):
         print_diagnostic_block(epoch, epoch_store[epoch], train_data.classes)
 
-    # ───────── FINAL RESULT ─────────
+    # ══════════════════════════
+    # PHASE 3 — final results
+    # ══════════════════════════
     best_epoch = max(epoch_store, key=lambda e: epoch_store[e]['acc'])
     best       = epoch_store[best_epoch]
     final      = epoch_store[epochs]
-    total_time = sum(epoch_times)
 
-    print("\n" + "=" * 65)
-    print("  FINAL RESULT")
-    print("=" * 65)
+    print("\n" + "=" * 70)
+    print("  FINAL RESULTS")
+    print("=" * 70)
 
     print(f"\n  --- Best Epoch ---")
     print(f"  Epoch          : {best_epoch}")
@@ -458,23 +461,25 @@ def train_model(model, loader, epochs):
     print(f"  Test Acc       : {best['acc']:.2f}%")
     print(f"  Loss           : {best['loss']:.4f}")
 
-    print(f"\n  --- Final Epoch ({epochs}) Summary ---")
-    print(f"  Final Test Acc : {final['acc']:.2f}%")
-    print(f"  Final Loss     : {final['loss']:.4f}")
+    print(f"\n  --- Final Epoch ({epochs}) ---")
+    print(f"  Test Acc       : {final['acc']:.2f}%")
+    print(f"  Loss           : {final['loss']:.4f}")
     print(f"  Total Time     : {total_time:.1f}s  ({total_time/epochs:.1f}s / epoch avg)")
 
-    print(f"\n  --- Final Per-class Accuracy ---")
+    print(f"\n  --- Per-class Accuracy (final epoch) ---")
     for i, name in enumerate(train_data.classes):
         c, t = final['per_class'][i]
-        print(f"    {name:<12}: {100*c/max(t,1):.2f}%  ({c}/{t})")
+        print(f"    {name:<14}: {100*c/max(t,1):.2f}%  ({c}/{t})")
 
-    print(f"\n  --- Final Confusion Matrix ---")
+    print(f"\n  --- Confusion Matrix (final epoch) ---")
     print_confusion(final['cm'], train_data.classes)
 
-    print("=" * 65)
+    print("=" * 70)
 
-    # ───────── VISUALISATION ─────────
-    print("\n  Generating thesis plots...")
+    # ══════════════════════════
+    # PHASE 4 — plots
+    # ══════════════════════════
+    print("\n  Generating plots...")
     plot_all(epoch_store, train_data.classes, epochs, best_epoch)
 
 
